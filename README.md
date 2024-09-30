@@ -18,7 +18,7 @@ sudo dnf config-manager --add-repo https://developer.download.nvidia.com/compute
 
 sudo dnf --disablerepo="rpmfusion-nonfree*" module install nvidia-driver:latest-dkms
 
-sudo dnf update
+sudo dnf --disablerepo="rpmfusion-nonfree*" update
 
 sudo reboot
 
