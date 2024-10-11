@@ -39,3 +39,13 @@ export LD_LIBRARY_PATH="/usr/local/cuda-12.6/lib64:$LD_LIBRARY_PATH"
 Then in new terminal window:
 
 nvcc --version
+
+# How to install CUDNN
+
+On Fedora 39, after having done all the above:
+
+sudo dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo
+
+sudo dnf install cudnn
+
+sudo dnf install libnccl
