@@ -1,9 +1,9 @@
-use std::collections::HashMap;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{linear, loss, prelu, Linear, Module, Optimizer, PReLU, VarBuilder, VarMap, SGD};
 use itertools::Itertools;
+use std::collections::HashMap;
 
-const LAYERS_DIM: usize = 32;
+const INNER_DIM: usize = 32;
 const EPOCHS: usize = 1000;
 const LEARNING_RATE: f64 = 0.001;
 const INPUT_TYPE: DType = DType::F32;
@@ -18,15 +18,11 @@ struct MultiLevelPerceptron {
 }
 
 impl MultiLevelPerceptron {
-    fn new(vs: VarBuilder, input_dim: usize) -> anyhow::Result<Self> {
-        let ln1 = linear(input_dim, LAYERS_DIM, vs.pp("ln1"))?;
+    fn new(vs: VarBuilder, input_dim: usize, output_categories: usize) -> anyhow::Result<Self> {
+        let ln1 = linear(input_dim, INNER_DIM, vs.pp("ln1"))?;
         let ac1 = prelu(None, vs.pp("ac1"))?;
-        let ln2 = linear(LAYERS_DIM, 2, vs.pp("ln2"))?;
-        Ok(Self {
-            ln1,
-            ac1,
-            ln2,
-        })
+        let ln2 = linear(INNER_DIM, output_categories, vs.pp("ln2"))?;
+        Ok(Self { ln1, ac1, ln2 })
     }
 
     fn forward(&self, xs: &Tensor) -> anyhow::Result<Tensor> {
@@ -41,6 +37,7 @@ pub fn train_and_evaluate_model(
     output_vec: Vec<u8>,
     leave_for_testing: usize,
     input_dim: usize,
+    output_categories: usize,
 ) -> anyhow::Result<f32> {
     let dev = Device::new_cuda(0)?;
     let test_input_vec = input_vec[0..(leave_for_testing * input_dim)].to_vec();
@@ -53,6 +50,7 @@ pub fn train_and_evaluate_model(
         train_input_vec.clone(),
         train_output_vec.clone(),
         input_dim,
+        output_categories,
     )?;
     println!("On overfitted training data:");
     evaluate_model(&dev, &model, train_input_vec, train_output_vec, input_dim)?;
@@ -71,24 +69,25 @@ fn train_model(
     train_input_vec: Vec<f32>,
     train_output_vec: Vec<u8>,
     input_dim: usize,
+    output_categories: usize,
 ) -> anyhow::Result<MultiLevelPerceptron> {
     let training_items_count = train_output_vec.iter().count();
     assert_eq!(
         train_input_vec.iter().count() / input_dim,
         training_items_count
     );
+    for output_item in &train_output_vec {
+        assert!(output_item < &(output_categories as u8));
+    }
     let train_input = Tensor::from_vec(train_input_vec, (training_items_count, input_dim), &dev)?
         .to_dtype(INPUT_TYPE)?;
-    let train_output = Tensor::from_vec(
-        train_output_vec,
-        training_items_count,
-        &dev,
-    )?
-    .to_dtype(OUTPUT_TYPE)?;
+    let train_output =
+        Tensor::from_vec(train_output_vec, training_items_count, &dev)?.to_dtype(OUTPUT_TYPE)?;
     let varmap = VarMap::new();
     let model = MultiLevelPerceptron::new(
         VarBuilder::from_varmap(&varmap, INPUT_TYPE, &dev),
         input_dim,
+        output_categories,
     )?;
     let mut sgd = SGD::new(varmap.all_vars(), LEARNING_RATE)?;
     for epoch in 1..EPOCHS + 1 {
@@ -110,11 +109,17 @@ fn apply_model(
     let output = model.forward(&input)?;
     let output: Vec<Vec<f32>> = output.to_vec2()?.clone();
     let output = output[0].clone();
-    if output[0] > output[1] {
-        Ok(0)
-    } else {
-        Ok(1)
+    let mut highest = output[0];
+    let mut intex_of_highest: u8 = 0;
+    let mut i = 0;
+    for e in output {
+        if e > highest {
+            highest = e;
+            intex_of_highest = i;
+        }
+        i += 1;
     }
+    Ok(intex_of_highest)
 }
 
 fn evaluate_model(
@@ -146,12 +151,24 @@ fn evaluate_model(
 
     let correct_output_frequencies: HashMap<u8, usize> = test_output_vec.into_iter().counts();
     let model_output_frequencies: HashMap<u8, usize> = test_outputs.into_iter().counts();
-    let correct_output_frequencies: Vec<(u8, usize)> = correct_output_frequencies.into_iter().sorted_by_key(|x| x.0).collect();
-    let model_output_frequencies: Vec<(u8, usize)> = model_output_frequencies.into_iter().sorted_by_key(|x| x.0).collect();
-    println!("Correct output frequencies {:?}.", correct_output_frequencies);
+    let correct_output_frequencies: Vec<(u8, usize)> = correct_output_frequencies
+        .into_iter()
+        .sorted_by_key(|x| x.0)
+        .collect();
+    let model_output_frequencies: Vec<(u8, usize)> = model_output_frequencies
+        .into_iter()
+        .sorted_by_key(|x| x.0)
+        .collect();
+    println!(
+        "Correct output frequencies {:?}.",
+        correct_output_frequencies
+    );
     println!("Model output frequencies {:?}.", model_output_frequencies);
     let precision = 100.0 * (correct as f32) / (i as f32);
-    println!("Correct: {}. Incorrect: {}. Precision: {}.", correct, incorrect, precision);
+    println!(
+        "Correct: {}. Incorrect: {}. Precision: {}.",
+        correct, incorrect, precision
+    );
     Ok(precision)
 }
 
@@ -195,7 +212,7 @@ mod tests {
             }
             output_vec.push(output)
         }
-        assert!(85.0 <= train_and_evaluate_model(input_vec, output_vec, items / 10, 5).unwrap());
+        assert!(85.0 <= train_and_evaluate_model(input_vec, output_vec, items / 10, 5, 2).unwrap());
     }
 
     fn test_cuda_vs_cpu() -> anyhow::Result<()> {
