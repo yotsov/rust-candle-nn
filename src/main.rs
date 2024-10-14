@@ -5,7 +5,7 @@ use candle_nn::{linear, loss, Linear, Module, Optimizer, VarBuilder, VarMap, SGD
 const LAYERS_DIM: usize = 32;
 const EPOCHS: usize = 10000;
 const LEARNING_RATE: f64 = 0.001;
-const INPUT_TYPE: DType = DType::F64;
+const INPUT_TYPE: DType = DType::F32;
 const OUTPUT_TYPE: DType = DType::U8;
 
 fn main() {}
@@ -23,14 +23,14 @@ struct MultiLevelPerceptron {
 
 impl MultiLevelPerceptron {
     fn new(vs: VarBuilder, input_dim: usize) -> anyhow::Result<Self> {
-        let ln1 = linear(input_dim, LAYERS_DIM, vs.pp("ln1"))?;
-        let ln2 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("ln2"))?;
-        let ln3 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("ln3"))?;
-        let ln4 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("ln4"))?;
-        let ln5 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("ln5"))?;
-        let ln6 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("ln6"))?;
-        let ln7 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("ln7"))?;
-        let ln8 = linear(LAYERS_DIM, 2, vs.pp("ln8"))?;
+        let ln1 = linear(input_dim, LAYERS_DIM, vs.pp("1"))?;
+        let ln2 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("2"))?;
+        let ln3 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("3"))?;
+        let ln4 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("4"))?;
+        let ln5 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("5"))?;
+        let ln6 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("6"))?;
+        let ln7 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("7"))?;
+        let ln8 = linear(LAYERS_DIM, 2, vs.pp("8"))?;
         Ok(Self {
             ln1,
             ln2,
@@ -63,11 +63,11 @@ impl MultiLevelPerceptron {
 }
 
 pub fn train_and_evaluate_model(
-    input_vec: Vec<f64>,
+    input_vec: Vec<f32>,
     output_vec: Vec<bool>,
     leave_for_testing: usize,
     input_dim: usize,
-) -> anyhow::Result<f64> {
+) -> anyhow::Result<f32> {
     let dev = Device::new_cuda(0)?;
     let test_input_vec = input_vec[0..(leave_for_testing * input_dim)].to_vec();
     let train_input_vec =
@@ -94,7 +94,7 @@ pub fn train_and_evaluate_model(
 
 fn train_model(
     dev: &Device,
-    train_input_vec: Vec<f64>,
+    train_input_vec: Vec<f32>,
     train_output_vec: Vec<bool>,
     input_dim: usize,
 ) -> anyhow::Result<MultiLevelPerceptron> {
@@ -127,7 +127,7 @@ fn train_model(
 }
 
 fn apply_model(
-    input: Vec<f64>,
+    input: Vec<f32>,
     dev: &Device,
     model: &MultiLevelPerceptron,
     input_dim: usize,
@@ -152,10 +152,10 @@ fn apply_model(
 fn evaluate_model(
     dev: &Device,
     model: &MultiLevelPerceptron,
-    test_input_vec: Vec<f64>,
+    test_input_vec: Vec<f32>,
     test_output_vec: Vec<bool>,
     input_dim: usize,
-) -> anyhow::Result<f64> {
+) -> anyhow::Result<f32> {
     assert_eq!(
         test_input_vec.iter().count() / input_dim,
         test_output_vec.iter().count()
@@ -166,7 +166,7 @@ fn evaluate_model(
     let mut correct_true = 0;
     let mut incorrect_true = 0;
     for correct_output in test_output_vec {
-        let test_input: Vec<f64> = test_input_vec[i * input_dim..(i + 1) * input_dim].to_vec();
+        let test_input: Vec<f32> = test_input_vec[i * input_dim..(i + 1) * input_dim].to_vec();
         let test_output = apply_model(test_input, dev, model, input_dim)?;
         i += 1;
         if test_output {
@@ -183,7 +183,7 @@ fn evaluate_model(
             }
         }
     }
-    let precision = 100.0 * ((correct_false + correct_true) as f64) / (i as f64);
+    let precision = 100.0 * ((correct_false + correct_true) as f32) / (i as f32);
     println!(
         "Correct FALSEs: {}. Incorrect FALSEs: {}. Correct TRUEs: {}. Incorrect TRUEs: {}. Precision: {}.",
         correct_false, incorrect_false, correct_true, incorrect_true, precision
@@ -197,7 +197,7 @@ mod tests {
     use rand::Rng;
     use std::time::Instant;
 
-    fn some_formula(n2: f64, n3: f64, n4: f64, n5: f64) -> bool {
+    fn some_formula(n2: f32, n3: f32, n4: f32, n5: f32) -> bool {
         n2 * n3 <= n4 * n5
     }
 
@@ -206,15 +206,15 @@ mod tests {
         test_cuda_vs_cpu().unwrap();
 
         let mut rng = rand::thread_rng();
-        let mut input_vec: Vec<f64> = Vec::new();
+        let mut input_vec: Vec<f32> = Vec::new();
         let mut output_vec: Vec<bool> = Vec::new();
         let items = 10000;
         for _ in 0..items {
-            let n1 = rng.gen::<i8>() as f64;
-            let n2 = rng.gen::<i8>() as f64;
-            let n3 = rng.gen::<i8>() as f64;
-            let n4 = rng.gen::<i8>() as f64;
-            let n5 = rng.gen::<i8>() as f64;
+            let n1 = rng.gen::<i8>() as f32;
+            let n2 = rng.gen::<i8>() as f32;
+            let n3 = rng.gen::<i8>() as f32;
+            let n4 = rng.gen::<i8>() as f32;
+            let n5 = rng.gen::<i8>() as f32;
             input_vec.push(n1); // doesn't affect the label at all
             input_vec.push(n2);
             input_vec.push(n3);
