@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{linear, loss, prelu, Linear, Module, Optimizer, PReLU, VarBuilder, VarMap, SGD};
+use itertools::Itertools;
 
 const LAYERS_DIM: usize = 32;
 const EPOCHS: usize = 1000;
@@ -129,21 +131,27 @@ fn evaluate_model(
     let mut i = 0;
     let mut correct = 0;
     let mut incorrect = 0;
-    for correct_output in test_output_vec {
+    let mut test_outputs = vec![];
+    for correct_output in &test_output_vec {
         let test_input: Vec<f32> = test_input_vec[i * input_dim..(i + 1) * input_dim].to_vec();
         let test_output = apply_model(test_input, dev, model, input_dim)?;
+        test_outputs.push(test_output);
         i += 1;
-        if test_output == correct_output {
+        if &test_output == correct_output {
             correct += 1;
         } else {
             incorrect += 1;
         }
     }
+
+    let correct_output_frequencies: HashMap<u8, usize> = test_output_vec.into_iter().counts();
+    let model_output_frequencies: HashMap<u8, usize> = test_outputs.into_iter().counts();
+    let correct_output_frequencies: Vec<(u8, usize)> = correct_output_frequencies.into_iter().sorted_by_key(|x| x.0).collect();
+    let model_output_frequencies: Vec<(u8, usize)> = model_output_frequencies.into_iter().sorted_by_key(|x| x.0).collect();
+    println!("Correct output frequencies {:?}.", correct_output_frequencies);
+    println!("Model output frequencies {:?}.", model_output_frequencies);
     let precision = 100.0 * (correct as f32) / (i as f32);
-    println!(
-        "Correct: {}. Incorrect: {}. Precision: {}.",
-        correct, incorrect, precision
-    );
+    println!("Correct: {}. Incorrect: {}. Precision: {}.", correct, incorrect, precision);
     Ok(precision)
 }
 
@@ -183,7 +191,7 @@ mod tests {
             let mut output = some_formula(n2, n3, n4, n5);
             if rng.gen_range(0..100) < 2 {
                 // we introduce some labeling error
-                output = !output;
+                output = rng.gen_range(0..2);
             }
             output_vec.push(output)
         }
