@@ -3,8 +3,8 @@ use candle_nn::{linear, loss, prelu, Linear, Module, Optimizer, PReLU, VarBuilde
 use itertools::Itertools;
 use std::collections::HashMap;
 
-const INNER_DIM: usize = 32;
-const EPOCHS: usize = 1000;
+const INNER_DIM: usize = 50;
+const EPOCHS: usize = 5000;
 const LEARNING_RATE: f64 = 0.001;
 const INPUT_TYPE: DType = DType::F32;
 const OUTPUT_TYPE: DType = DType::U8;
@@ -179,20 +179,25 @@ mod tests {
     use std::time::Instant;
 
     fn some_formula(n2: f32, n3: f32, n4: f32, n5: f32) -> u8 {
-        if n2 * n3 <= n4 * n5 {
+        if n2 * n3 - n4 * n5 < 1000f32 && n2 * n3 - n4 * n5 > -1000f32 {
             0
         } else {
-            1
+            if n2 * n3 <= n4 * n5 {
+                1
+            } else {
+                2
+            }
         }
     }
 
     #[test]
-    fn test_train_and_evaluate_model() {
+    pub(crate) fn test_train_and_evaluate_model() {
         test_cuda_vs_cpu().unwrap();
 
         let mut rng = rand::thread_rng();
         let mut input_vec: Vec<f32> = Vec::new();
         let mut output_vec: Vec<u8> = Vec::new();
+        let categories: usize = 3;
         let items = 10000;
         for _ in 0..items {
             let n1 = rng.gen::<i8>() as f32;
@@ -208,11 +213,14 @@ mod tests {
             let mut output = some_formula(n2, n3, n4, n5);
             if rng.gen_range(0..100) < 2 {
                 // we introduce some labeling error
-                output = rng.gen_range(0..2);
+                output = rng.gen_range(0..categories as u8);
             }
             output_vec.push(output)
         }
-        assert!(85.0 <= train_and_evaluate_model(input_vec, output_vec, items / 10, 5, 2).unwrap());
+        assert!(
+            80.0 <= train_and_evaluate_model(input_vec, output_vec, items / 10, 5, categories)
+                .unwrap()
+        );
     }
 
     fn test_cuda_vs_cpu() -> anyhow::Result<()> {
