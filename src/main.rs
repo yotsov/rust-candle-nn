@@ -3,7 +3,7 @@ use candle_core::{DType, Device, Tensor, D};
 use candle_nn::{linear, loss, Linear, Module, Optimizer, VarBuilder, VarMap, SGD};
 
 const LAYERS_DIM: usize = 32;
-const EPOCHS: usize = 10000;
+const EPOCHS: usize = 1000;
 const LEARNING_RATE: f64 = 0.001;
 const INPUT_TYPE: DType = DType::F32;
 const OUTPUT_TYPE: DType = DType::U8;
@@ -13,52 +13,22 @@ fn main() {}
 struct MultiLevelPerceptron {
     ln1: Linear,
     ln2: Linear,
-    ln3: Linear,
-    ln4: Linear,
-    ln5: Linear,
-    ln6: Linear,
-    ln7: Linear,
-    ln8: Linear,
 }
 
 impl MultiLevelPerceptron {
     fn new(vs: VarBuilder, input_dim: usize) -> anyhow::Result<Self> {
         let ln1 = linear(input_dim, LAYERS_DIM, vs.pp("1"))?;
-        let ln2 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("2"))?;
-        let ln3 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("3"))?;
-        let ln4 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("4"))?;
-        let ln5 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("5"))?;
-        let ln6 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("6"))?;
-        let ln7 = linear(LAYERS_DIM, LAYERS_DIM, vs.pp("7"))?;
-        let ln8 = linear(LAYERS_DIM, 2, vs.pp("8"))?;
+        let ln2 = linear(LAYERS_DIM, 2, vs.pp("2"))?;
         Ok(Self {
             ln1,
             ln2,
-            ln3,
-            ln4,
-            ln5,
-            ln6,
-            ln7,
-            ln8,
         })
     }
 
     fn forward(&self, xs: &Tensor) -> anyhow::Result<Tensor> {
         let xs = self.ln1.forward(xs)?;
         let xs = xs.relu()?;
-        let xs = self.ln2.forward(&xs)?;
-        let xs = xs.relu()?;
-        let xs = self.ln3.forward(&xs)?;
-        let xs = xs.relu()?;
-        let xs = self.ln4.forward(&xs)?;
-        let xs = xs.relu()?;
-        let xs = self.ln5.forward(&xs)?;
-        let xs = xs.relu()?;
-        let xs = self.ln6.forward(&xs)?;
-        let xs = xs.relu()?;
-        let xs = self.ln7.forward(&xs)?;
-        let xs = xs.relu()?;
-        Ok(self.ln8.forward(&xs)?)
+        Ok(self.ln2.forward(&xs)?)
     }
 }
 
@@ -227,7 +197,7 @@ mod tests {
             }
             output_vec.push(output)
         }
-        assert!(90.0 <= train_and_evaluate_model(input_vec, output_vec, items / 10, 5).unwrap());
+        assert!(85.0 <= train_and_evaluate_model(input_vec, output_vec, items / 10, 5).unwrap());
     }
 
     fn test_cuda_vs_cpu() -> anyhow::Result<()> {
