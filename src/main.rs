@@ -1,5 +1,5 @@
 use candle_core::{DType, Device, Tensor};
-use candle_nn::{linear, loss, Linear, Module, Optimizer, VarBuilder, VarMap, SGD};
+use candle_nn::{linear, loss, prelu, Linear, Module, Optimizer, PReLU, VarBuilder, VarMap, SGD};
 
 const LAYERS_DIM: usize = 32;
 const EPOCHS: usize = 1000;
@@ -11,22 +11,25 @@ fn main() {}
 
 struct MultiLevelPerceptron {
     ln1: Linear,
+    ac1: PReLU,
     ln2: Linear,
 }
 
 impl MultiLevelPerceptron {
     fn new(vs: VarBuilder, input_dim: usize) -> anyhow::Result<Self> {
-        let ln1 = linear(input_dim, LAYERS_DIM, vs.pp("1"))?;
-        let ln2 = linear(LAYERS_DIM, 2, vs.pp("2"))?;
+        let ln1 = linear(input_dim, LAYERS_DIM, vs.pp("ln1"))?;
+        let ac1 = prelu(None, vs.pp("ac1"))?;
+        let ln2 = linear(LAYERS_DIM, 2, vs.pp("ln2"))?;
         Ok(Self {
             ln1,
+            ac1,
             ln2,
         })
     }
 
     fn forward(&self, xs: &Tensor) -> anyhow::Result<Tensor> {
         let xs = self.ln1.forward(xs)?;
-        let xs = xs.relu()?;
+        let xs = self.ac1.forward(&xs)?;
         Ok(self.ln2.forward(&xs)?)
     }
 }
