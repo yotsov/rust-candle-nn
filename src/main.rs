@@ -36,7 +36,7 @@ impl MultiLevelPerceptron {
 
 pub fn train_and_evaluate_model(
     input_vec: Vec<f32>,
-    output_vec: Vec<bool>,
+    output_vec: Vec<u8>,
     leave_for_testing: usize,
     input_dim: usize,
 ) -> anyhow::Result<f32> {
@@ -67,7 +67,7 @@ pub fn train_and_evaluate_model(
 fn train_model(
     dev: &Device,
     train_input_vec: Vec<f32>,
-    train_output_vec: Vec<bool>,
+    train_output_vec: Vec<u8>,
     input_dim: usize,
 ) -> anyhow::Result<MultiLevelPerceptron> {
     let training_items_count = train_output_vec.iter().count();
@@ -78,7 +78,7 @@ fn train_model(
     let train_input = Tensor::from_vec(train_input_vec, (training_items_count, input_dim), &dev)?
         .to_dtype(INPUT_TYPE)?;
     let train_output = Tensor::from_vec(
-        train_output_vec.into_iter().map(|b| b as u8).collect(),
+        train_output_vec,
         training_items_count,
         &dev,
     )?
@@ -103,15 +103,15 @@ fn apply_model(
     dev: &Device,
     model: &MultiLevelPerceptron,
     input_dim: usize,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<u8> {
     let input = Tensor::from_vec(input, (1, input_dim), dev)?.to_dtype(INPUT_TYPE)?;
     let output = model.forward(&input)?;
     let output: Vec<Vec<f32>> = output.to_vec2()?.clone();
     let output = output[0].clone();
     if output[0] > output[1] {
-        Ok(false)
+        Ok(0)
     } else {
-        Ok(true)
+        Ok(1)
     }
 }
 
@@ -119,7 +119,7 @@ fn evaluate_model(
     dev: &Device,
     model: &MultiLevelPerceptron,
     test_input_vec: Vec<f32>,
-    test_output_vec: Vec<bool>,
+    test_output_vec: Vec<u8>,
     input_dim: usize,
 ) -> anyhow::Result<f32> {
     assert_eq!(
@@ -127,32 +127,22 @@ fn evaluate_model(
         test_output_vec.iter().count()
     );
     let mut i = 0;
-    let mut correct_false = 0;
-    let mut incorrect_false = 0;
-    let mut correct_true = 0;
-    let mut incorrect_true = 0;
+    let mut correct = 0;
+    let mut incorrect = 0;
     for correct_output in test_output_vec {
         let test_input: Vec<f32> = test_input_vec[i * input_dim..(i + 1) * input_dim].to_vec();
         let test_output = apply_model(test_input, dev, model, input_dim)?;
         i += 1;
-        if test_output {
-            if correct_output {
-                correct_true += 1;
-            } else {
-                incorrect_true += 1;
-            }
+        if test_output == correct_output {
+            correct += 1;
         } else {
-            if correct_output {
-                incorrect_false += 1;
-            } else {
-                correct_false += 1;
-            }
+            incorrect += 1;
         }
     }
-    let precision = 100.0 * ((correct_false + correct_true) as f32) / (i as f32);
+    let precision = 100.0 * (correct as f32) / (i as f32);
     println!(
-        "Correct FALSEs: {}. Incorrect FALSEs: {}. Correct TRUEs: {}. Incorrect TRUEs: {}. Precision: {}.",
-        correct_false, incorrect_false, correct_true, incorrect_true, precision
+        "Correct: {}. Incorrect: {}. Precision: {}.",
+        correct, incorrect, precision
     );
     Ok(precision)
 }
@@ -163,8 +153,12 @@ mod tests {
     use rand::Rng;
     use std::time::Instant;
 
-    fn some_formula(n2: f32, n3: f32, n4: f32, n5: f32) -> bool {
-        n2 * n3 <= n4 * n5
+    fn some_formula(n2: f32, n3: f32, n4: f32, n5: f32) -> u8 {
+        if n2 * n3 <= n4 * n5 {
+            0
+        } else {
+            1
+        }
     }
 
     #[test]
@@ -173,7 +167,7 @@ mod tests {
 
         let mut rng = rand::thread_rng();
         let mut input_vec: Vec<f32> = Vec::new();
-        let mut output_vec: Vec<bool> = Vec::new();
+        let mut output_vec: Vec<u8> = Vec::new();
         let items = 10000;
         for _ in 0..items {
             let n1 = rng.gen::<i8>() as f32;
