@@ -1,5 +1,4 @@
-use anyhow::{Context, Error};
-use candle_core::{DType, Device, Tensor, D};
+use candle_core::{DType, Device, Tensor};
 use candle_nn::{linear, loss, Linear, Module, Optimizer, VarBuilder, VarMap, SGD};
 
 const LAYERS_DIM: usize = 32;
@@ -103,19 +102,13 @@ fn apply_model(
     input_dim: usize,
 ) -> anyhow::Result<bool> {
     let input = Tensor::from_vec(input, (1, input_dim), dev)?.to_dtype(INPUT_TYPE)?;
-    let output = model.forward(&input)?.argmax(D::Minus1)?;
-    let output: u8 = output
-        .to_dtype(OUTPUT_TYPE)?
-        .to_vec1::<u8>()?
-        .first()
-        .context("Empty tensor")?
-        .to_owned();
-    if output == 1 {
-        Ok(true)
-    } else if output == 0 {
+    let output = model.forward(&input)?;
+    let output: Vec<Vec<f32>> = output.to_vec2()?.clone();
+    let output = output[0].clone();
+    if output[0] > output[1] {
         Ok(false)
     } else {
-        Err(Error::msg("Model must return 1 or 0."))
+        Ok(true)
     }
 }
 
@@ -216,7 +209,7 @@ mod tests {
         Ok(())
     }
 
-    fn turn_some_wheels(device: &Device, iterations: i32) -> Result<(), Error> {
+    fn turn_some_wheels(device: &Device, iterations: i32) -> anyhow::Result<()> {
         for _ in 0..iterations {
             let a = Tensor::randn(0f32, 1., (200, 300), device)?;
             let b = Tensor::randn(0f32, 1., (300, 400), device)?;
