@@ -1,6 +1,6 @@
 use anyhow::{Context, Error};
 use candle_core::{DType, Device, Tensor, D};
-use candle_nn::{linear, loss, ops, Linear, Module, Optimizer, VarBuilder, VarMap, SGD};
+use candle_nn::{linear, loss, Linear, Module, Optimizer, VarBuilder, VarMap, SGD};
 
 const LAYERS_DIM: usize = 32;
 const EPOCHS: usize = 10000;
@@ -119,8 +119,7 @@ fn train_model(
     let mut sgd = SGD::new(varmap.all_vars(), LEARNING_RATE)?;
     for epoch in 1..EPOCHS + 1 {
         let logits = model.forward(&train_input)?;
-        let log_sm = ops::log_softmax(&logits, D::Minus1)?;
-        let loss = loss::nll(&log_sm, &train_output)?;
+        let loss = loss::cross_entropy(&logits, &train_output)?;
         sgd.backward_step(&loss)?;
         println!("Epoch: {} Loss: {:?}", epoch, loss);
     }
