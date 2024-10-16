@@ -9,7 +9,7 @@ const LEARNING_RATE: f64 = 0.001;
 fn main() {}
 
 trait Model<T> {
-    fn new(input_dim: usize, output_categories: usize, dtype: DType, device: &Device) -> Self;
+    fn new(input_dim: usize, output_categories: usize, dtype: DType, device: &Device) -> Self where Self: Sized;
     fn forward(&self, tensor: &Tensor) -> anyhow::Result<Tensor>;
     fn input_to_tensor(&self, input: Vec<T>, device: &Device) -> anyhow::Result<Tensor>;
 }
@@ -118,7 +118,7 @@ fn train_model(
     Ok(model)
 }
 
-fn apply_model(input: Vec<f32>, dev: &Device, model: &FunctionApproximator) -> anyhow::Result<u8> {
+fn apply_model<T>(input: Vec<T>, dev: &Device, model: &dyn Model<T>) -> anyhow::Result<u8> {
     let input = model.input_to_tensor(input, dev)?;
     let output = model.forward(&input)?;
     let output: Vec<Vec<f32>> = output.to_vec2()?.clone();
