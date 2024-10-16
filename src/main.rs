@@ -2,22 +2,52 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::{linear, loss, prelu, Linear, Module, Optimizer, PReLU, VarBuilder, VarMap, SGD};
 use itertools::Itertools;
 use std::collections::HashMap;
+use std::time::Instant;
 
 const EPOCHS: usize = 5000;
 const LEARNING_RATE: f64 = 0.001;
 
-fn main() {}
+fn main() -> anyhow::Result<()> {
+    let device = Device::new_cuda(0)?;
+    let now = Instant::now();
+    turn_some_wheels(&device, 10000)?;
+    let elapsed1 = now.elapsed();
+    println!("GPU 10000 iterations: {:.2?}", elapsed1);
+    let device = Device::Cpu;
+    let now = Instant::now();
+    turn_some_wheels(&device, 10)?;
+    let elapsed2 = now.elapsed();
+    println!("CPU 10 iterations: {:.2?}", elapsed2);
+    assert!(elapsed1 < elapsed2);
+    println!("With tensors the GPU is more than 1000 times faster than the 1-threaded CPU.");
+    Ok(())
+}
 
-trait Model<T> {
-    fn new(input_dim: usize, output_categories: usize, dtype: DType, device: &Device) -> Self where Self: Sized;
+fn turn_some_wheels(device: &Device, iterations: i32) -> anyhow::Result<()> {
+    for _ in 0..iterations {
+        let a = Tensor::randn(0f32, 1., (200, 300), device)?;
+        let b = Tensor::randn(0f32, 1., (300, 400), device)?;
+        a.matmul(&b)?;
+    }
+    Ok(())
+}
+
+trait Model<T: Clone> {
+    fn new(input_dim: usize, output_categories: usize, dtype: DType, device: &Device) -> Self
+    where
+        Self: Sized;
     fn forward(&self, tensor: &Tensor) -> anyhow::Result<Tensor>;
     fn input_to_tensor(&self, input: Vec<T>, device: &Device) -> anyhow::Result<Tensor>;
+    fn get_input_dim(&self) -> usize;
+    fn get_output_categories(&self) -> usize;
+    fn get_var_map(&self) -> &VarMap;
 }
 
 #[derive(Clone)]
 struct FunctionApproximator {
     var_map: VarMap,
     input_dim: usize,
+    output_categories: usize,
     dtype: DType,
     ln1: Linear,
     ac1: PReLU,
@@ -35,6 +65,7 @@ impl Model<f32> for FunctionApproximator {
         Self {
             var_map,
             input_dim,
+            output_categories,
             dtype,
             ln1,
             ac1,
@@ -56,69 +87,77 @@ impl Model<f32> for FunctionApproximator {
                 .to_dtype(self.dtype)?,
         )
     }
+
+    fn get_input_dim(&self) -> usize {
+        self.input_dim
+    }
+
+    fn get_output_categories(&self) -> usize {
+        self.output_categories
+    }
+
+    fn get_var_map(&self) -> &VarMap {
+        &self.var_map
+    }
 }
 
-fn train_and_evaluate_model(
-    input_vec: Vec<f32>,
+fn train_and_evaluate_model<T: Clone>(
+    model: &dyn Model<T>,
+    input_vec: Vec<T>,
     output_vec: Vec<u8>,
     leave_for_testing: usize,
-    input_dim: usize,
-    output_categories: usize,
+    device: &Device,
 ) -> anyhow::Result<f32> {
-    let dev = Device::new_cuda(0)?;
-    let test_input_vec = input_vec[0..(leave_for_testing * input_dim)].to_vec();
+    let test_input_vec = input_vec[0..(leave_for_testing * model.get_input_dim())].to_vec();
     let train_input_vec =
-        input_vec[(leave_for_testing * input_dim)..input_vec.iter().count()].to_vec();
+        input_vec[(leave_for_testing * model.get_input_dim())..input_vec.iter().count()].to_vec();
     let test_output_vec = output_vec[0..leave_for_testing].to_vec();
     let train_output_vec = output_vec[leave_for_testing..output_vec.iter().count()].to_vec();
-    let model = train_model(
-        &dev,
+    train_model(
+        model,
         train_input_vec.clone(),
         train_output_vec.clone(),
-        input_dim,
-        output_categories,
+        device,
     )?;
     println!("On overfitted training data:");
-    evaluate_model(&dev, &model, train_input_vec, train_output_vec)?;
+    evaluate_model(model, train_input_vec, train_output_vec, device)?;
     println!("On left aside test data:");
     Ok(evaluate_model(
-        &dev,
-        &model,
+        model,
         test_input_vec,
         test_output_vec,
+        device,
     )?)
 }
 
-fn train_model(
-    dev: &Device,
-    train_input_vec: Vec<f32>,
+fn train_model<T: Clone>(
+    model: &dyn Model<T>,
+    train_input_vec: Vec<T>,
     train_output_vec: Vec<u8>,
-    input_dim: usize,
-    output_categories: usize,
-) -> anyhow::Result<FunctionApproximator> {
-    let training_items_count = train_output_vec.iter().count();
+    device: &Device,
+) -> anyhow::Result<()> {
+    let training_items_count = train_output_vec.len();
     assert_eq!(
-        train_input_vec.iter().count() / input_dim,
+        train_input_vec.iter().count() / model.get_input_dim(),
         training_items_count
     );
     for output_item in &train_output_vec {
-        assert!(output_item < &(output_categories as u8));
+        assert!((output_item.clone() as usize) < model.get_output_categories());
     }
     let train_output =
-        Tensor::from_vec(train_output_vec, training_items_count, &dev)?.to_dtype(DType::U8)?;
-    let model = FunctionApproximator::new(input_dim, output_categories, DType::F32, dev);
-    let train_input = model.input_to_tensor(train_input_vec, dev)?;
-    let mut sgd = SGD::new(model.var_map.all_vars(), LEARNING_RATE)?;
+        Tensor::from_vec(train_output_vec, training_items_count, device)?.to_dtype(DType::U8)?;
+    let train_input = model.input_to_tensor(train_input_vec, device)?;
+    let mut sgd = SGD::new(model.get_var_map().all_vars(), LEARNING_RATE)?;
     for epoch in 1..EPOCHS + 1 {
         let logits = model.forward(&train_input)?;
         let loss = loss::cross_entropy(&logits, &train_output)?;
         sgd.backward_step(&loss)?;
         println!("Epoch: {} Loss: {:?}", epoch, loss);
     }
-    Ok(model)
+    Ok(())
 }
 
-fn apply_model<T>(input: Vec<T>, dev: &Device, model: &dyn Model<T>) -> anyhow::Result<u8> {
+fn apply_model<T: Clone>(model: &dyn Model<T>, input: Vec<T>, dev: &Device) -> anyhow::Result<u8> {
     let input = model.input_to_tensor(input, dev)?;
     let output = model.forward(&input)?;
     let output: Vec<Vec<f32>> = output.to_vec2()?.clone();
@@ -136,14 +175,14 @@ fn apply_model<T>(input: Vec<T>, dev: &Device, model: &dyn Model<T>) -> anyhow::
     Ok(intex_of_highest)
 }
 
-fn evaluate_model(
-    dev: &Device,
-    model: &FunctionApproximator,
-    test_input_vec: Vec<f32>,
+fn evaluate_model<T: Clone>(
+    model: &dyn Model<T>,
+    test_input_vec: Vec<T>,
     test_output_vec: Vec<u8>,
+    device: &Device,
 ) -> anyhow::Result<f32> {
     assert_eq!(
-        test_input_vec.iter().count() / model.input_dim,
+        test_input_vec.iter().count() / model.get_input_dim(),
         test_output_vec.iter().count()
     );
     let mut i = 0;
@@ -151,9 +190,9 @@ fn evaluate_model(
     let mut incorrect = 0;
     let mut test_outputs = vec![];
     for correct_output in &test_output_vec {
-        let test_input: Vec<f32> =
-            test_input_vec[i * model.input_dim..(i + 1) * model.input_dim].to_vec();
-        let test_output = apply_model(test_input, dev, model)?;
+        let test_input: Vec<T> =
+            test_input_vec[i * model.get_input_dim()..(i + 1) * model.get_input_dim()].to_vec();
+        let test_output = apply_model(model, test_input, device)?;
         test_outputs.push(test_output);
         i += 1;
         if &test_output == correct_output {
@@ -190,9 +229,8 @@ fn evaluate_model(
 mod tests {
     use super::*;
     use rand::Rng;
-    use std::time::Instant;
 
-    fn some_formula(n2: f32, n3: f32, n4: f32, n5: f32) -> u8 {
+    fn some_function(n2: f32, n3: f32, n4: f32, n5: f32) -> u8 {
         if n2 * n3 - n4 * n5 < 1000f32 && n2 * n3 - n4 * n5 > -1000f32 {
             0
         } else {
@@ -206,12 +244,11 @@ mod tests {
 
     #[test]
     pub(crate) fn test_train_and_evaluate_model() {
-        test_cuda_vs_cpu().unwrap();
-
+        let device = Device::new_cuda(0).unwrap();
+        let model = FunctionApproximator::new(5, 3, DType::F32, &device);
         let mut rng = rand::thread_rng();
-        let mut input_vec: Vec<f32> = Vec::new();
-        let mut output_vec: Vec<u8> = Vec::new();
-        let categories: usize = 3;
+        let mut input: Vec<f32> = Vec::new();
+        let mut labels: Vec<u8> = Vec::new();
         let items = 10000;
         for _ in 0..items {
             let n1 = rng.gen::<i8>() as f32;
@@ -219,46 +256,20 @@ mod tests {
             let n3 = rng.gen::<i8>() as f32;
             let n4 = rng.gen::<i8>() as f32;
             let n5 = rng.gen::<i8>() as f32;
-            input_vec.push(n1); // doesn't affect the label at all
-            input_vec.push(n2);
-            input_vec.push(n3);
-            input_vec.push(n4);
-            input_vec.push(n5);
-            let mut output = some_formula(n2, n3, n4, n5);
+            input.push(n1); // doesn't affect the label at all
+            input.push(n2);
+            input.push(n3);
+            input.push(n4);
+            input.push(n5);
+            let mut output = some_function(n2, n3, n4, n5);
             if rng.gen_range(0..100) < 2 {
                 // we introduce some labeling error
-                output = rng.gen_range(0..categories as u8);
+                output = rng.gen_range(0..model.output_categories as u8);
             }
-            output_vec.push(output)
+            labels.push(output)
         }
         assert!(
-            80.0 <= train_and_evaluate_model(input_vec, output_vec, items / 10, 5, categories)
-                .unwrap()
+            80.0 <= train_and_evaluate_model(&model, input, labels, items / 10, &device).unwrap()
         );
-    }
-
-    fn test_cuda_vs_cpu() -> anyhow::Result<()> {
-        let device = Device::new_cuda(0)?;
-        let now = Instant::now();
-        turn_some_wheels(&device, 10000)?;
-        let elapsed1 = now.elapsed();
-        println!("GPU 10000 iterations: {:.2?}", elapsed1);
-        let device = Device::Cpu;
-        let now = Instant::now();
-        turn_some_wheels(&device, 10)?;
-        let elapsed2 = now.elapsed();
-        println!("CPU 10 iterations: {:.2?}", elapsed2);
-        assert!(elapsed1 < elapsed2);
-        println!("The GPU is more than 1000 times faster than the CPU.");
-        Ok(())
-    }
-
-    fn turn_some_wheels(device: &Device, iterations: i32) -> anyhow::Result<()> {
-        for _ in 0..iterations {
-            let a = Tensor::randn(0f32, 1., (200, 300), device)?;
-            let b = Tensor::randn(0f32, 1., (300, 400), device)?;
-            a.matmul(&b)?;
-        }
-        Ok(())
     }
 }
