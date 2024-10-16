@@ -3,41 +3,62 @@ use candle_nn::{linear, loss, prelu, Linear, Module, Optimizer, PReLU, VarBuilde
 use itertools::Itertools;
 use std::collections::HashMap;
 
-const INNER_DIM: usize = 50;
 const EPOCHS: usize = 5000;
 const LEARNING_RATE: f64 = 0.001;
-const INPUT_TYPE: DType = DType::F32;
-const OUTPUT_TYPE: DType = DType::U8;
 
 fn main() {}
 
+trait Model<T> {
+    fn new(input_dim: usize, output_categories: usize, dtype: DType, device: &Device) -> Self;
+    fn forward(&self, tensor: &Tensor) -> anyhow::Result<Tensor>;
+    fn input_to_tensor(&self, input: Vec<T>, device: &Device) -> anyhow::Result<Tensor>;
+}
+
+#[derive(Clone)]
 struct FunctionApproximator {
     var_map: VarMap,
     input_dim: usize,
+    dtype: DType,
     ln1: Linear,
     ac1: PReLU,
     ln2: Linear,
 }
 
-impl FunctionApproximator {
-    fn new(dev: &Device, input_dim: usize, output_categories: usize) -> anyhow::Result<Self> {
+impl Model<f32> for FunctionApproximator {
+    fn new(input_dim: usize, output_categories: usize, dtype: DType, device: &Device) -> Self {
+        let inner_dim: usize = 50;
         let var_map = VarMap::new();
-        let vb = VarBuilder::from_varmap(&var_map, DType::F32, dev);
-        let ln1 = linear(input_dim, INNER_DIM, vb.pp("ln1"))?;
-        let ac1 = prelu(None, vb.pp("ac1"))?;
-        let ln2 = linear(INNER_DIM, output_categories, vb.pp("ln2"))?;
-        Ok(Self { var_map, input_dim, ln1, ac1, ln2 })
+        let vb = VarBuilder::from_varmap(&var_map, DType::F32, device);
+        let ln1 = linear(input_dim, inner_dim, vb.pp("ln1")).unwrap();
+        let ac1 = prelu(None, vb.pp("ac1")).unwrap();
+        let ln2 = linear(inner_dim, output_categories, vb.pp("ln2")).unwrap();
+        Self {
+            var_map,
+            input_dim,
+            dtype,
+            ln1,
+            ac1,
+            ln2,
+        }
     }
 
-    fn forward(&self, xs: &Tensor) -> anyhow::Result<Tensor> {
-        let xs = self.ln1.forward(xs)?;
-        let xs = self.ac1.forward(&xs)?;
-        let xs = self.ln2.forward(&xs)?;
-        Ok(xs)
+    fn forward(&self, tensor: &Tensor) -> anyhow::Result<Tensor> {
+        let tensor = self.ln1.forward(tensor)?;
+        let tensor = self.ac1.forward(&tensor)?;
+        let tensor = self.ln2.forward(&tensor)?;
+        Ok(tensor)
+    }
+
+    fn input_to_tensor(&self, input: Vec<f32>, device: &Device) -> anyhow::Result<Tensor> {
+        let length = input.len();
+        Ok(
+            Tensor::from_vec(input, (length / self.input_dim, self.input_dim), device)?
+                .to_dtype(self.dtype)?,
+        )
     }
 }
 
-pub fn train_and_evaluate_model(
+fn train_and_evaluate_model(
     input_vec: Vec<f32>,
     output_vec: Vec<u8>,
     leave_for_testing: usize,
@@ -83,11 +104,10 @@ fn train_model(
     for output_item in &train_output_vec {
         assert!(output_item < &(output_categories as u8));
     }
-    let train_input = Tensor::from_vec(train_input_vec, (training_items_count, input_dim), &dev)?
-        .to_dtype(INPUT_TYPE)?;
     let train_output =
-        Tensor::from_vec(train_output_vec, training_items_count, &dev)?.to_dtype(OUTPUT_TYPE)?;
-    let model = FunctionApproximator::new(dev, input_dim, output_categories)?;
+        Tensor::from_vec(train_output_vec, training_items_count, &dev)?.to_dtype(DType::U8)?;
+    let model = FunctionApproximator::new(input_dim, output_categories, DType::F32, dev);
+    let train_input = model.input_to_tensor(train_input_vec, dev)?;
     let mut sgd = SGD::new(model.var_map.all_vars(), LEARNING_RATE)?;
     for epoch in 1..EPOCHS + 1 {
         let logits = model.forward(&train_input)?;
@@ -98,12 +118,8 @@ fn train_model(
     Ok(model)
 }
 
-fn apply_model(
-    input: Vec<f32>,
-    dev: &Device,
-    model: &FunctionApproximator,
-) -> anyhow::Result<u8> {
-    let input = Tensor::from_vec(input, (1, model.input_dim), dev)?.to_dtype(INPUT_TYPE)?;
+fn apply_model(input: Vec<f32>, dev: &Device, model: &FunctionApproximator) -> anyhow::Result<u8> {
+    let input = model.input_to_tensor(input, dev)?;
     let output = model.forward(&input)?;
     let output: Vec<Vec<f32>> = output.to_vec2()?.clone();
     let output = output[0].clone();
@@ -135,7 +151,8 @@ fn evaluate_model(
     let mut incorrect = 0;
     let mut test_outputs = vec![];
     for correct_output in &test_output_vec {
-        let test_input: Vec<f32> = test_input_vec[i * model.input_dim..(i + 1) * model.input_dim].to_vec();
+        let test_input: Vec<f32> =
+            test_input_vec[i * model.input_dim..(i + 1) * model.input_dim].to_vec();
         let test_output = apply_model(test_input, dev, model)?;
         test_outputs.push(test_output);
         i += 1;
