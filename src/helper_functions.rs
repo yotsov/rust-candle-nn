@@ -1,0 +1,142 @@
+use std::collections::HashMap;
+use candle_core::{DType, Device, Tensor};
+use candle_nn::{loss, Optimizer, VarMap, SGD};
+use itertools::Itertools;
+
+const EPOCHS: usize = 5000;
+const LEARNING_RATE: f64 = 0.001;
+
+pub(crate) trait Model<T: Clone> {
+    fn new(input_dim: usize, output_categories: usize, dtype: DType, device: &Device) -> Self
+    where
+        Self: Sized;
+    fn forward(&self, tensor: &Tensor) -> anyhow::Result<Tensor>;
+    fn input_to_tensor(&self, input: Vec<T>, device: &Device) -> anyhow::Result<Tensor>;
+    fn get_input_dim(&self) -> usize;
+    fn get_output_categories(&self) -> usize;
+    fn get_var_map(&self) -> &VarMap;
+}
+
+pub(crate) fn train_and_evaluate_model<T: Clone>(
+    model: &dyn Model<T>,
+    input_vec: Vec<T>,
+    output_vec: Vec<u8>,
+    leave_for_testing: usize,
+    device: &Device,
+) -> anyhow::Result<f32> {
+    let test_input_vec = input_vec[0..(leave_for_testing * model.get_input_dim())].to_vec();
+    let train_input_vec =
+        input_vec[(leave_for_testing * model.get_input_dim())..input_vec.iter().count()].to_vec();
+    let test_output_vec = output_vec[0..leave_for_testing].to_vec();
+    let train_output_vec = output_vec[leave_for_testing..output_vec.iter().count()].to_vec();
+    train_model(
+        model,
+        train_input_vec.clone(),
+        train_output_vec.clone(),
+        device,
+    )?;
+    println!("On overfitted training data:");
+    evaluate_model(model, train_input_vec, train_output_vec, device)?;
+    println!("On left aside test data:");
+    Ok(evaluate_model(
+        model,
+        test_input_vec,
+        test_output_vec,
+        device,
+    )?)
+}
+
+fn train_model<T: Clone>(
+    model: &dyn Model<T>,
+    train_input_vec: Vec<T>,
+    train_output_vec: Vec<u8>,
+    device: &Device,
+) -> anyhow::Result<()> {
+    let training_items_count = train_output_vec.len();
+    assert_eq!(
+        train_input_vec.iter().count() / model.get_input_dim(),
+        training_items_count
+    );
+    for output_item in &train_output_vec {
+        assert!((output_item.clone() as usize) < model.get_output_categories());
+    }
+    let train_output =
+        Tensor::from_vec(train_output_vec, training_items_count, device)?.to_dtype(DType::U8)?;
+    let train_input = model.input_to_tensor(train_input_vec, device)?;
+    let mut sgd = SGD::new(model.get_var_map().all_vars(), LEARNING_RATE)?;
+    for epoch in 1..EPOCHS + 1 {
+        let logits = model.forward(&train_input)?;
+        let loss = loss::cross_entropy(&logits, &train_output)?;
+        sgd.backward_step(&loss)?;
+        println!("Epoch: {} Loss: {:?}", epoch, loss);
+    }
+    Ok(())
+}
+
+fn apply_model<T: Clone>(model: &dyn Model<T>, input: Vec<T>, dev: &Device) -> anyhow::Result<u8> {
+    let input = model.input_to_tensor(input, dev)?;
+    let output = model.forward(&input)?;
+    let output: Vec<Vec<f32>> = output.to_vec2()?.clone();
+    let output = output[0].clone();
+    let mut highest = output[0];
+    let mut intex_of_highest: u8 = 0;
+    let mut i = 0;
+    for e in output {
+        if e > highest {
+            highest = e;
+            intex_of_highest = i;
+        }
+        i += 1;
+    }
+    Ok(intex_of_highest)
+}
+
+fn evaluate_model<T: Clone>(
+    model: &dyn Model<T>,
+    test_input_vec: Vec<T>,
+    test_output_vec: Vec<u8>,
+    device: &Device,
+) -> anyhow::Result<f32> {
+    assert_eq!(
+        test_input_vec.iter().count() / model.get_input_dim(),
+        test_output_vec.iter().count()
+    );
+    let mut i = 0;
+    let mut correct = 0;
+    let mut incorrect = 0;
+    let mut test_outputs = vec![];
+    for correct_output in &test_output_vec {
+        let test_input: Vec<T> =
+            test_input_vec[i * model.get_input_dim()..(i + 1) * model.get_input_dim()].to_vec();
+        let test_output = apply_model(model, test_input, device)?;
+        test_outputs.push(test_output);
+        i += 1;
+        if &test_output == correct_output {
+            correct += 1;
+        } else {
+            incorrect += 1;
+        }
+    }
+
+    let correct_output_frequencies: HashMap<u8, usize> = test_output_vec.into_iter().counts();
+    let model_output_frequencies: HashMap<u8, usize> = test_outputs.into_iter().counts();
+    let correct_output_frequencies: Vec<(u8, usize)> = correct_output_frequencies
+        .into_iter()
+        .sorted_by_key(|x| x.0)
+        .collect();
+    let model_output_frequencies: Vec<(u8, usize)> = model_output_frequencies
+        .into_iter()
+        .sorted_by_key(|x| x.0)
+        .collect();
+    println!(
+        "Correct output frequencies {:?}.",
+        correct_output_frequencies
+    );
+    println!("Model output frequencies {:?}.", model_output_frequencies);
+    let precision = 100.0 * (correct as f32) / (i as f32);
+    println!(
+        "Correct: {}. Incorrect: {}. Precision: {}.",
+        correct, incorrect, precision
+    );
+    Ok(precision)
+}
