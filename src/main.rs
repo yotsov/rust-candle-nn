@@ -11,24 +11,29 @@ const OUTPUT_TYPE: DType = DType::U8;
 
 fn main() {}
 
-struct MultiLevelPerceptron {
+struct FunctionApproximator {
+    var_map: VarMap,
+    input_dim: usize,
     ln1: Linear,
     ac1: PReLU,
     ln2: Linear,
 }
 
-impl MultiLevelPerceptron {
-    fn new(vs: VarBuilder, input_dim: usize, output_categories: usize) -> anyhow::Result<Self> {
-        let ln1 = linear(input_dim, INNER_DIM, vs.pp("ln1"))?;
-        let ac1 = prelu(None, vs.pp("ac1"))?;
-        let ln2 = linear(INNER_DIM, output_categories, vs.pp("ln2"))?;
-        Ok(Self { ln1, ac1, ln2 })
+impl FunctionApproximator {
+    fn new(dev: &Device, input_dim: usize, output_categories: usize) -> anyhow::Result<Self> {
+        let var_map = VarMap::new();
+        let vb = VarBuilder::from_varmap(&var_map, DType::F32, dev);
+        let ln1 = linear(input_dim, INNER_DIM, vb.pp("ln1"))?;
+        let ac1 = prelu(None, vb.pp("ac1"))?;
+        let ln2 = linear(INNER_DIM, output_categories, vb.pp("ln2"))?;
+        Ok(Self { var_map, input_dim, ln1, ac1, ln2 })
     }
 
     fn forward(&self, xs: &Tensor) -> anyhow::Result<Tensor> {
         let xs = self.ln1.forward(xs)?;
         let xs = self.ac1.forward(&xs)?;
-        Ok(self.ln2.forward(&xs)?)
+        let xs = self.ln2.forward(&xs)?;
+        Ok(xs)
     }
 }
 
@@ -53,14 +58,13 @@ pub fn train_and_evaluate_model(
         output_categories,
     )?;
     println!("On overfitted training data:");
-    evaluate_model(&dev, &model, train_input_vec, train_output_vec, input_dim)?;
+    evaluate_model(&dev, &model, train_input_vec, train_output_vec)?;
     println!("On left aside test data:");
     Ok(evaluate_model(
         &dev,
         &model,
         test_input_vec,
         test_output_vec,
-        input_dim,
     )?)
 }
 
@@ -70,7 +74,7 @@ fn train_model(
     train_output_vec: Vec<u8>,
     input_dim: usize,
     output_categories: usize,
-) -> anyhow::Result<MultiLevelPerceptron> {
+) -> anyhow::Result<FunctionApproximator> {
     let training_items_count = train_output_vec.iter().count();
     assert_eq!(
         train_input_vec.iter().count() / input_dim,
@@ -83,13 +87,8 @@ fn train_model(
         .to_dtype(INPUT_TYPE)?;
     let train_output =
         Tensor::from_vec(train_output_vec, training_items_count, &dev)?.to_dtype(OUTPUT_TYPE)?;
-    let varmap = VarMap::new();
-    let model = MultiLevelPerceptron::new(
-        VarBuilder::from_varmap(&varmap, INPUT_TYPE, &dev),
-        input_dim,
-        output_categories,
-    )?;
-    let mut sgd = SGD::new(varmap.all_vars(), LEARNING_RATE)?;
+    let model = FunctionApproximator::new(dev, input_dim, output_categories)?;
+    let mut sgd = SGD::new(model.var_map.all_vars(), LEARNING_RATE)?;
     for epoch in 1..EPOCHS + 1 {
         let logits = model.forward(&train_input)?;
         let loss = loss::cross_entropy(&logits, &train_output)?;
@@ -102,10 +101,9 @@ fn train_model(
 fn apply_model(
     input: Vec<f32>,
     dev: &Device,
-    model: &MultiLevelPerceptron,
-    input_dim: usize,
+    model: &FunctionApproximator,
 ) -> anyhow::Result<u8> {
-    let input = Tensor::from_vec(input, (1, input_dim), dev)?.to_dtype(INPUT_TYPE)?;
+    let input = Tensor::from_vec(input, (1, model.input_dim), dev)?.to_dtype(INPUT_TYPE)?;
     let output = model.forward(&input)?;
     let output: Vec<Vec<f32>> = output.to_vec2()?.clone();
     let output = output[0].clone();
@@ -124,13 +122,12 @@ fn apply_model(
 
 fn evaluate_model(
     dev: &Device,
-    model: &MultiLevelPerceptron,
+    model: &FunctionApproximator,
     test_input_vec: Vec<f32>,
     test_output_vec: Vec<u8>,
-    input_dim: usize,
 ) -> anyhow::Result<f32> {
     assert_eq!(
-        test_input_vec.iter().count() / input_dim,
+        test_input_vec.iter().count() / model.input_dim,
         test_output_vec.iter().count()
     );
     let mut i = 0;
@@ -138,8 +135,8 @@ fn evaluate_model(
     let mut incorrect = 0;
     let mut test_outputs = vec![];
     for correct_output in &test_output_vec {
-        let test_input: Vec<f32> = test_input_vec[i * input_dim..(i + 1) * input_dim].to_vec();
-        let test_output = apply_model(test_input, dev, model, input_dim)?;
+        let test_input: Vec<f32> = test_input_vec[i * model.input_dim..(i + 1) * model.input_dim].to_vec();
+        let test_output = apply_model(test_input, dev, model)?;
         test_outputs.push(test_output);
         i += 1;
         if &test_output == correct_output {
