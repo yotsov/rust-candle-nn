@@ -8,9 +8,10 @@ struct FunctionApproximator {
     input_dim: usize,
     output_categories: usize,
     dtype: DType,
-    ln1: Linear,
-    ac1: PReLU,
-    ln2: Linear,
+    // Feedforward layers:
+    linear1: Linear,
+    activation: PReLU,
+    linear2: Linear,
 }
 
 impl Model<f32> for FunctionApproximator {
@@ -18,24 +19,24 @@ impl Model<f32> for FunctionApproximator {
         let inner_dim: usize = 50;
         let var_map = VarMap::new();
         let vb = VarBuilder::from_varmap(&var_map, DType::F32, device);
-        let ln1 = linear(input_dim, inner_dim, vb.pp("ln1")).unwrap();
-        let ac1 = prelu(None, vb.pp("ac1")).unwrap();
-        let ln2 = linear(inner_dim, output_categories, vb.pp("ln2")).unwrap();
+        let linear1 = linear(input_dim, inner_dim, vb.pp("linear1")).unwrap();
+        let activation = prelu(None, vb.pp("activation")).unwrap();
+        let linear2 = linear(inner_dim, output_categories, vb.pp("linear2")).unwrap();
         Self {
             var_map,
             input_dim,
             output_categories,
             dtype,
-            ln1,
-            ac1,
-            ln2,
+            linear1,
+            activation,
+            linear2,
         }
     }
 
     fn forward(&self, tensor: &Tensor) -> anyhow::Result<Tensor> {
-        let tensor = self.ln1.forward(tensor)?;
-        let tensor = self.ac1.forward(&tensor)?;
-        let tensor = self.ln2.forward(&tensor)?;
+        let tensor = self.linear1.forward(tensor)?;
+        let tensor = self.activation.forward(&tensor)?;
+        let tensor = self.linear2.forward(&tensor)?;
         Ok(tensor)
     }
 

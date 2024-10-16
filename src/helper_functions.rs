@@ -19,16 +19,16 @@ pub(crate) trait Model<T: Clone> {
 
 pub(crate) fn train_and_evaluate_model<T: Clone>(
     model: &dyn Model<T>,
-    input_vec: Vec<T>,
-    output_vec: Vec<u8>,
+    input: Vec<T>,
+    labels: Vec<u8>,
     leave_for_testing: usize,
     device: &Device,
 ) -> anyhow::Result<f32> {
-    let test_input_vec = input_vec[0..(leave_for_testing * model.get_input_dim())].to_vec();
+    let test_input_vec = input[0..(leave_for_testing * model.get_input_dim())].to_vec();
     let train_input_vec =
-        input_vec[(leave_for_testing * model.get_input_dim())..input_vec.iter().count()].to_vec();
-    let test_output_vec = output_vec[0..leave_for_testing].to_vec();
-    let train_output_vec = output_vec[leave_for_testing..output_vec.iter().count()].to_vec();
+        input[(leave_for_testing * model.get_input_dim())..input.iter().count()].to_vec();
+    let test_output_vec = labels[0..leave_for_testing].to_vec();
+    let train_output_vec = labels[leave_for_testing..labels.iter().count()].to_vec();
     train_model(
         model,
         train_input_vec.clone(),
@@ -48,21 +48,21 @@ pub(crate) fn train_and_evaluate_model<T: Clone>(
 
 fn train_model<T: Clone>(
     model: &dyn Model<T>,
-    train_input_vec: Vec<T>,
-    train_output_vec: Vec<u8>,
+    input: Vec<T>,
+    labels: Vec<u8>,
     device: &Device,
 ) -> anyhow::Result<()> {
-    let training_items_count = train_output_vec.len();
+    let training_items_count = labels.len();
     assert_eq!(
-        train_input_vec.iter().count() / model.get_input_dim(),
+        input.iter().count() / model.get_input_dim(),
         training_items_count
     );
-    for output_item in &train_output_vec {
-        assert!((output_item.clone() as usize) < model.get_output_categories());
+    for output_item in &labels {
+        assert!((*output_item as usize) < model.get_output_categories());
     }
     let train_output =
-        Tensor::from_vec(train_output_vec, training_items_count, device)?.to_dtype(DType::U8)?;
-    let train_input = model.input_to_tensor(train_input_vec, device)?;
+        Tensor::from_vec(labels, training_items_count, device)?.to_dtype(DType::U8)?;
+    let train_input = model.input_to_tensor(input, device)?;
     let mut sgd = SGD::new(model.get_var_map().all_vars(), LEARNING_RATE)?;
     for epoch in 1..EPOCHS + 1 {
         let logits = model.forward(&train_input)?;
@@ -73,11 +73,10 @@ fn train_model<T: Clone>(
     Ok(())
 }
 
-fn apply_model<T: Clone>(model: &dyn Model<T>, input: Vec<T>, dev: &Device) -> anyhow::Result<u8> {
-    let input = model.input_to_tensor(input, dev)?;
-    let output = model.forward(&input)?;
-    let output: Vec<Vec<f32>> = output.to_vec2()?.clone();
-    let output = output[0].clone();
+fn apply_model<T: Clone>(model: &dyn Model<T>, input: Vec<T>, device: &Device) -> anyhow::Result<u8> {
+    let input = model.input_to_tensor(input, device)?;
+    let output = model.forward(&input)?.squeeze(0)?;
+    let output: Vec<f32> = output.to_vec1()?;
     let mut highest = output[0];
     let mut intex_of_highest: u8 = 0;
     let mut i = 0;
@@ -93,23 +92,23 @@ fn apply_model<T: Clone>(model: &dyn Model<T>, input: Vec<T>, dev: &Device) -> a
 
 fn evaluate_model<T: Clone>(
     model: &dyn Model<T>,
-    test_input_vec: Vec<T>,
-    test_output_vec: Vec<u8>,
+    input: Vec<T>,
+    labels: Vec<u8>,
     device: &Device,
 ) -> anyhow::Result<f32> {
     assert_eq!(
-        test_input_vec.iter().count() / model.get_input_dim(),
-        test_output_vec.iter().count()
+        input.iter().count() / model.get_input_dim(),
+        labels.iter().count()
     );
     let mut i = 0;
     let mut correct = 0;
     let mut incorrect = 0;
-    let mut test_outputs = vec![];
-    for correct_output in &test_output_vec {
+    let mut model_outputs = vec![];
+    for correct_output in &labels {
         let test_input: Vec<T> =
-            test_input_vec[i * model.get_input_dim()..(i + 1) * model.get_input_dim()].to_vec();
+            input[i * model.get_input_dim()..(i + 1) * model.get_input_dim()].to_vec();
         let test_output = apply_model(model, test_input, device)?;
-        test_outputs.push(test_output);
+        model_outputs.push(test_output);
         i += 1;
         if &test_output == correct_output {
             correct += 1;
@@ -117,26 +116,18 @@ fn evaluate_model<T: Clone>(
             incorrect += 1;
         }
     }
-
-    let correct_output_frequencies: HashMap<u8, usize> = test_output_vec.into_iter().counts();
-    let model_output_frequencies: HashMap<u8, usize> = test_outputs.into_iter().counts();
-    let correct_output_frequencies: Vec<(u8, usize)> = correct_output_frequencies
-        .into_iter()
-        .sorted_by_key(|x| x.0)
-        .collect();
-    let model_output_frequencies: Vec<(u8, usize)> = model_output_frequencies
-        .into_iter()
-        .sorted_by_key(|x| x.0)
-        .collect();
-    println!(
-        "Correct output frequencies {:?}.",
-        correct_output_frequencies
-    );
-    println!("Model output frequencies {:?}.", model_output_frequencies);
+    println!("Label frequencies {:?}.", to_sorted_frequencies(labels));
+    println!("Model output frequencies {:?}.", to_sorted_frequencies(model_outputs));
     let precision = 100.0 * (correct as f32) / (i as f32);
     println!(
         "Correct: {}. Incorrect: {}. Precision: {}.",
         correct, incorrect, precision
     );
     Ok(precision)
+}
+
+fn to_sorted_frequencies(v: Vec<u8>) -> Vec<(u8, usize)> {
+    let m: HashMap<u8, usize> = v.into_iter().counts();
+    let res: Vec<(u8, usize)> = m.into_iter().sorted_by_key(|x| x.0).collect();
+    res
 }
