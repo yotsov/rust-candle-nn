@@ -1,10 +1,9 @@
 use crate::helper_functions::Model;
-use candle_core::{DType, Device, Tensor, D};
+use candle_core::{DType, Device, Tensor};
 use candle_nn::{
-    conv1d, embedding, linear, prelu, Conv1d, Embedding, Linear, Module, Optimizer, PReLU,
+    conv1d, embedding, linear, prelu, Conv1d, Embedding, Linear, Module, PReLU,
     VarBuilder, VarMap,
 };
-use itertools::Itertools;
 
 #[derive(Clone)]
 struct SentimentDetection {
@@ -54,7 +53,7 @@ impl Model<u32> for SentimentDetection {
     fn forward(&self, tensor: &Tensor) -> anyhow::Result<Tensor> {
         let tensor = self.embedding.forward(tensor)?;
         let tensor = self.conv.forward(&tensor)?;
-        let tensor = tensor.squeeze(D::Minus1)?;
+        let tensor = tensor.squeeze(2)?;
         let tensor = self.activation.forward(&tensor)?;
         let tensor = self.linear.forward(&tensor)?;
         Ok(tensor)
@@ -142,7 +141,7 @@ mod tests {
             }
         }
         assert!(
-            20.0 <= train_and_evaluate_model(&model, input, labels, sentences / 20, &device)
+            20.0 <= train_and_evaluate_model(&model, input, labels, sentences / 20, 0.1, &device)
                 .unwrap()
         );
     }

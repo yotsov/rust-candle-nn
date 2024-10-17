@@ -106,7 +106,7 @@ mod tests {
             labels.push(output)
         }
         assert!(
-            80.0 <= train_and_evaluate_model(&model, input, labels, items / 10, &device).unwrap()
+            80.0 <= train_and_evaluate_model(&model, input, labels, items / 10, 0.00001, &device).unwrap()
         );
     }
 }

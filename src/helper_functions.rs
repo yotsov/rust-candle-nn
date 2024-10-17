@@ -3,9 +3,6 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::{loss, Optimizer, VarMap, SGD};
 use itertools::Itertools;
 
-const EPOCHS: usize = 5000;
-const LEARNING_RATE: f64 = 0.001;
-
 pub(crate) trait Model<T: Clone> {
     fn new(input_dim: usize, output_categories: usize, dtype: DType, device: &Device) -> Self
     where
@@ -22,6 +19,7 @@ pub(crate) fn train_and_evaluate_model<T: Clone>(
     input: Vec<T>,
     labels: Vec<u8>,
     leave_for_testing: usize,
+    learning_rate: f64,
     device: &Device,
 ) -> anyhow::Result<f32> {
     let test_input_vec = input[0..(leave_for_testing * model.get_input_dim())].to_vec();
@@ -33,6 +31,7 @@ pub(crate) fn train_and_evaluate_model<T: Clone>(
         model,
         train_input_vec.clone(),
         train_output_vec.clone(),
+        learning_rate,
         device,
     )?;
     println!("On overfitted training data:");
@@ -50,6 +49,7 @@ fn train_model<T: Clone>(
     model: &dyn Model<T>,
     input: Vec<T>,
     labels: Vec<u8>,
+    learning_rate: f64,
     device: &Device,
 ) -> anyhow::Result<()> {
     let training_items_count = labels.len();
@@ -63,13 +63,22 @@ fn train_model<T: Clone>(
     let train_output =
         Tensor::from_vec(labels, training_items_count, device)?.to_dtype(DType::U8)?;
     let train_input = model.input_to_tensor(input, device)?;
-    let mut sgd = SGD::new(model.get_var_map().all_vars(), LEARNING_RATE)?;
-    for epoch in 1..EPOCHS + 1 {
+    let mut sgd = SGD::new(model.get_var_map().all_vars(), learning_rate)?;
+    let mut loss3ago = 0.0;
+    let mut loss2ago = 0.0;
+    let mut loss1ago = 0.0;
+    let mut epoch = 0;
+    while loss1ago <= (loss2ago + loss3ago) / 2.0 || epoch < 100 {
+        epoch += 1;
         let logits = model.forward(&train_input)?;
         let loss = loss::cross_entropy(&logits, &train_output)?;
         sgd.backward_step(&loss)?;
-        println!("Epoch: {} Loss: {:?}", epoch, loss);
+        let loss: f32 = loss.to_scalar()?;
+        loss3ago = loss2ago;
+        loss2ago = loss1ago;
+        loss1ago = loss;
     }
+    println!("Epochs: {} Loss: {}", epoch, loss1ago);
     Ok(())
 }
 
