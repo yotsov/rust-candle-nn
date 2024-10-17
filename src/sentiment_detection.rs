@@ -1,0 +1,149 @@
+use crate::helper_functions::Model;
+use candle_core::{DType, Device, Tensor, D};
+use candle_nn::{
+    conv1d, embedding, linear, prelu, Conv1d, Embedding, Linear, Module, Optimizer, PReLU,
+    VarBuilder, VarMap,
+};
+use itertools::Itertools;
+
+#[derive(Clone)]
+struct SentimentDetection {
+    var_map: VarMap,
+    input_dim: usize,
+    output_categories: usize,
+    dtype: DType,
+    // Feedforward layers:
+    embedding: Embedding,
+    conv: Conv1d,
+    activation: PReLU,
+    linear: Linear,
+}
+
+impl Model<u32> for SentimentDetection {
+    fn new(input_dim: usize, output_categories: usize, dtype: DType, device: &Device) -> Self
+    where
+        Self: Sized,
+    {
+        let inner_dim1: usize = 5;
+        let inner_dim2: usize = 5;
+        let var_map = VarMap::new();
+        let vb = VarBuilder::from_varmap(&var_map, DType::F32, device);
+        let embedding = embedding(input_dim, inner_dim1, vb.pp("embedding")).unwrap();
+        let conv = conv1d(
+            input_dim,
+            inner_dim2,
+            inner_dim1,
+            Default::default(),
+            vb.pp("conv"),
+        )
+        .unwrap();
+        let activation = prelu(None, vb.pp("activation")).unwrap();
+        let linear = linear(inner_dim2, output_categories, vb.pp("linear")).unwrap();
+        Self {
+            var_map,
+            input_dim,
+            output_categories,
+            dtype,
+            embedding,
+            conv,
+            activation,
+            linear,
+        }
+    }
+
+    fn forward(&self, tensor: &Tensor) -> anyhow::Result<Tensor> {
+        let tensor = self.embedding.forward(tensor)?;
+        let tensor = self.conv.forward(&tensor)?;
+        let tensor = tensor.squeeze(D::Minus1)?;
+        let tensor = self.activation.forward(&tensor)?;
+        let tensor = self.linear.forward(&tensor)?;
+        Ok(tensor)
+    }
+
+    fn input_to_tensor(&self, input: Vec<u32>, device: &Device) -> anyhow::Result<Tensor> {
+        let length = input.len();
+        Ok(
+            Tensor::from_vec(input, (length / self.input_dim, self.input_dim), device)?
+                .to_dtype(self.dtype)?,
+        )
+    }
+
+    fn get_input_dim(&self) -> usize {
+        self.input_dim
+    }
+
+    fn get_output_categories(&self) -> usize {
+        self.output_categories
+    }
+
+    fn get_var_map(&self) -> &VarMap {
+        &self.var_map
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::helper_functions::train_and_evaluate_model;
+    use rand::Rng;
+    use std::collections::HashSet;
+
+    fn label_sentence(
+        sentence: &Vec<u32>,
+        positive_words: &HashSet<u32>,
+        negative_words: &HashSet<u32>,
+    ) -> Option<u8> {
+        let mut positive_found = 0;
+        let mut negative_found = 0;
+        for word in sentence {
+            if positive_words.contains(word) {
+                positive_found += 1;
+            }
+            if negative_words.contains(word) {
+                negative_found += 1;
+            }
+        }
+        if positive_found == negative_found {
+            None
+        } else if positive_found < negative_found {
+            Some(0)
+        } else {
+            Some(1)
+        }
+    }
+
+    #[test]
+    fn test_train_and_evaluate_model() {
+        let device = Device::new_cuda(0).unwrap();
+        let model = SentimentDetection::new(10, 2, DType::U32, &device);
+        let positive_words_number = 50;
+        let negative_words_number = 50;
+        let mut rng = rand::thread_rng();
+        let mut positive_words = HashSet::new();
+        for _word in 0..positive_words_number {
+            positive_words.insert(rng.gen::<u8>() as u32);
+        }
+        let mut negative_words = HashSet::new();
+        for _word in 0..negative_words_number {
+            negative_words.insert(rng.gen::<u8>() as u32);
+        }
+        let mut input: Vec<u32> = Vec::new();
+        let mut labels: Vec<u8> = Vec::new();
+        let sentences = 10000;
+        for _sentence in 0..sentences {
+            let mut sentence = Vec::new();
+            for _word in 0..model.get_input_dim() {
+                sentence.push(rng.gen::<u8>() as u32);
+            }
+            let label = label_sentence(&sentence, &positive_words, &negative_words);
+            if label.is_some() {
+                input.append(&mut sentence);
+                labels.push(label.unwrap());
+            }
+        }
+        assert!(
+            20.0 <= train_and_evaluate_model(&model, input, labels, sentences / 20, &device)
+                .unwrap()
+        );
+    }
+}

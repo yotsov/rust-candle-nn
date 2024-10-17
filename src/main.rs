@@ -1,5 +1,6 @@
 mod helper_functions;
 mod function_approximator;
+mod sentiment_detection;
 
 use candle_core::{Device, Tensor};
 use std::time::Instant;
