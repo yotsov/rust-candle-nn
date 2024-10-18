@@ -99,14 +99,14 @@ mod tests {
             input.push(n4);
             input.push(n5);
             let mut output = some_function(n2, n3, n4, n5);
-            if rng.gen_range(0..100) < 2 {
+            if rng.gen_range(0..100) < 1 {
                 // we introduce some labeling error
                 output = rng.gen_range(0..model.output_categories as u8);
             }
             labels.push(output)
         }
         assert!(
-            80.0 <= train_and_evaluate_model(&model, input, labels, items / 10, 0.00001, &device).unwrap()
+            90.0 <= train_and_evaluate_model(&model, input, labels, items / 10, 0.00003, &device).unwrap()
         );
     }
 }

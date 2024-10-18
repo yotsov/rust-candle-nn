@@ -64,21 +64,19 @@ fn train_model<T: Clone>(
         Tensor::from_vec(labels, training_items_count, device)?.to_dtype(DType::U8)?;
     let train_input = model.input_to_tensor(input, device)?;
     let mut sgd = SGD::new(model.get_var_map().all_vars(), learning_rate)?;
-    let mut loss3ago = 0.0;
-    let mut loss2ago = 0.0;
-    let mut loss1ago = 0.0;
     let mut epoch = 0;
-    while loss1ago <= (loss2ago + loss3ago) / 2.0 || epoch < 100 {
+    let mut previous_losses: Vec<f32> = vec![0.0, 0.0, 0.0, 0.0, 0.0];
+    let l = previous_losses.len();
+    while previous_losses[l-1] < previous_losses.iter().sum::<f32>() / l as f32 || epoch < 100 {
         epoch += 1;
         let logits = model.forward(&train_input)?;
         let loss = loss::cross_entropy(&logits, &train_output)?;
         sgd.backward_step(&loss)?;
         let loss: f32 = loss.to_scalar()?;
-        loss3ago = loss2ago;
-        loss2ago = loss1ago;
-        loss1ago = loss;
+        previous_losses.remove(0);
+        previous_losses.push(loss);
     }
-    println!("Epochs: {} Loss: {}", epoch, loss1ago);
+    println!("Epochs: {} Loss: {}", epoch, previous_losses[l-1]);
     Ok(())
 }
 
