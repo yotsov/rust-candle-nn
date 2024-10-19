@@ -106,12 +106,12 @@ mod tests {
                 negative_found += 1;
             }
         }
-        if positive_found == negative_found {
-            None
-        } else if positive_found < negative_found {
+        if positive_found == 0 && negative_found > 0 {
             Some(0)
-        } else {
+        } else if positive_found > 0 && negative_found == 0 {
             Some(1)
+        } else {
+            None
         }
     }
 
@@ -132,7 +132,7 @@ mod tests {
         }
         let mut input: Vec<u32> = Vec::new();
         let mut labels: Vec<u8> = Vec::new();
-        let sentences = 10000;
+        let sentences = 100000;
         for _sentence in 0..sentences {
             let mut sentence = Vec::new();
             for _word in 0..model.get_input_dim() {
@@ -145,7 +145,7 @@ mod tests {
             }
         }
         assert!(
-            20.0 <= train_and_evaluate_model(&model, input, labels, sentences / 20, 0.02, &device)
+            60.0 <= train_and_evaluate_model(&model, input, labels, sentences / 20, 0.02, &device)
                 .unwrap()
         );
     }

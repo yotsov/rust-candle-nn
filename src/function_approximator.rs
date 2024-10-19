@@ -68,10 +68,10 @@ mod tests {
     use crate::helper_functions::train_and_evaluate_model;
 
     fn some_function(n2: f32, n3: f32, n4: f32, n5: f32) -> u8 {
-        if n2 * n3 - n4 * n5 < 1000f32 && n2 * n3 - n4 * n5 > -1000f32 {
+        if n2 * n3 - n4 * n5 < 1000.0 && n2 * n3 - n4 * n5 > -1000.0 {
             0
         } else {
-            if n2 * n3 <= n4 * n5 {
+            if n2 * n3 < n4 * n5 {
                 1
             } else {
                 2
