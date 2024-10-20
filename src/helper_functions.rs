@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{loss, Optimizer, VarMap, SGD};
 use itertools::Itertools;
+use std::collections::HashMap;
 
 pub(crate) trait Model<T: Clone> {
     fn new(input_dim: usize, output_categories: usize, dtype: DType, device: &Device) -> Self
@@ -67,7 +67,7 @@ fn train_model<T: Clone>(
     let mut epoch = 0;
     let mut previous_losses: Vec<f32> = vec![0.0, 0.0, 0.0, 0.0, 0.0];
     let l = previous_losses.len();
-    while previous_losses[l-1] < previous_losses.iter().sum::<f32>() / l as f32 || epoch < 100 {
+    while previous_losses[l - 1] < previous_losses.iter().sum::<f32>() / l as f32 || epoch < 100 {
         epoch += 1;
         let logits = model.forward(&train_input)?;
         let loss = loss::cross_entropy(&logits, &train_output)?;
@@ -76,11 +76,15 @@ fn train_model<T: Clone>(
         previous_losses.remove(0);
         previous_losses.push(loss);
     }
-    println!("Epochs: {} Loss: {}", epoch, previous_losses[l-1]);
+    println!("Epochs: {} Loss: {}", epoch, previous_losses[l - 1]);
     Ok(())
 }
 
-fn apply_model<T: Clone>(model: &dyn Model<T>, input: Vec<T>, device: &Device) -> anyhow::Result<u8> {
+fn apply_model<T: Clone>(
+    model: &dyn Model<T>,
+    input: Vec<T>,
+    device: &Device,
+) -> anyhow::Result<u8> {
     let input = model.input_to_tensor(input, device)?;
     let output = model.forward(&input)?.squeeze(0)?;
     let output: Vec<f32> = output.to_vec1()?;
@@ -124,7 +128,10 @@ fn evaluate_model<T: Clone>(
         }
     }
     println!("Label frequencies {:?}.", to_sorted_frequencies(labels));
-    println!("Model output frequencies {:?}.", to_sorted_frequencies(model_outputs));
+    println!(
+        "Model output frequencies {:?}.",
+        to_sorted_frequencies(model_outputs)
+    );
     let precision = 100.0 * (correct as f32) / (i as f32);
     println!(
         "Correct: {}. Incorrect: {}. Precision: {}.",

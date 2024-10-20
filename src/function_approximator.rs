@@ -80,7 +80,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_train_and_evaluate_model() {
+    fn test_model() {
         let device = Device::new_cuda(0).unwrap();
         let model = FunctionApproximator::new(5, 3, DType::F32, &device);
         let mut rng = rand::thread_rng();

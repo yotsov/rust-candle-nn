@@ -116,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn test_train_and_evaluate_model() {
+    fn test_model() {
         let device = Device::new_cuda(0).unwrap();
         let model = SentimentDetection::new(10, 2, DType::U32, &device);
         let positive_words_number = 50;
