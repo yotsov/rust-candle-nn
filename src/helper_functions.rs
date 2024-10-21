@@ -132,12 +132,12 @@ fn evaluate_model<T: Clone>(
         "Model output frequencies {:?}.",
         to_sorted_frequencies(model_outputs)
     );
-    let precision = 100.0 * (correct as f32) / (i as f32);
+    let accuracy = 100.0 * (correct as f32) / (i as f32);
     println!(
-        "Correct: {}. Incorrect: {}. Precision: {}.",
-        correct, incorrect, precision
+        "Correct: {}. Incorrect: {}. Accuracy: {}.",
+        correct, incorrect, accuracy
     );
-    Ok(precision)
+    Ok(accuracy)
 }
 
 fn to_sorted_frequencies(v: Vec<u8>) -> Vec<(u8, usize)> {
