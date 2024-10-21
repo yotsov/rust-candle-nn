@@ -4,7 +4,7 @@ use itertools::Itertools;
 use std::collections::HashMap;
 
 pub(crate) trait Model<T: Clone> {
-    fn new(input_dim: usize, output_categories: usize, dtype: DType, device: &Device) -> Self
+    fn new(input_dim: usize, output_categories: usize, device: &Device) -> Self
     where
         Self: Sized;
     fn forward(&self, tensor: &Tensor) -> anyhow::Result<Tensor>;

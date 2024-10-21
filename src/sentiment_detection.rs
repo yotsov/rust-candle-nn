@@ -10,7 +10,6 @@ struct SentimentDetection {
     var_map: VarMap,
     input_dim: usize,
     output_categories: usize,
-    dtype: DType,
     // Feedforward layers:
     embedding: Embedding,
     activation1: PReLU,
@@ -20,7 +19,7 @@ struct SentimentDetection {
 }
 
 impl Model<u32> for SentimentDetection {
-    fn new(input_dim: usize, output_categories: usize, dtype: DType, device: &Device) -> Self
+    fn new(input_dim: usize, output_categories: usize, device: &Device) -> Self
     where
         Self: Sized,
     {
@@ -44,7 +43,6 @@ impl Model<u32> for SentimentDetection {
             var_map,
             input_dim,
             output_categories,
-            dtype,
             embedding,
             activation1,
             conv,
@@ -67,7 +65,7 @@ impl Model<u32> for SentimentDetection {
         let length = input.len();
         Ok(
             Tensor::from_vec(input, (length / self.input_dim, self.input_dim), device)?
-                .to_dtype(self.dtype)?,
+                .to_dtype(DType::U32)?,
         )
     }
 
@@ -118,7 +116,7 @@ mod tests {
     #[test]
     fn test_model() {
         let device = Device::new_cuda(0).unwrap();
-        let model = SentimentDetection::new(10, 2, DType::U32, &device);
+        let model = SentimentDetection::new(10, 2, &device);
         let positive_words_number = 50;
         let negative_words_number = 50;
         let mut rng = rand::thread_rng();

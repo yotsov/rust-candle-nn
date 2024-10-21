@@ -7,7 +7,6 @@ struct FunctionApproximator {
     var_map: VarMap,
     input_dim: usize,
     output_categories: usize,
-    dtype: DType,
     // Feedforward layers:
     linear1: Linear,
     activation: PReLU,
@@ -15,7 +14,7 @@ struct FunctionApproximator {
 }
 
 impl Model<f32> for FunctionApproximator {
-    fn new(input_dim: usize, output_categories: usize, dtype: DType, device: &Device) -> Self {
+    fn new(input_dim: usize, output_categories: usize, device: &Device) -> Self {
         let inner_dim: usize = 50;
         let var_map = VarMap::new();
         let vb = VarBuilder::from_varmap(&var_map, DType::F32, device);
@@ -26,7 +25,6 @@ impl Model<f32> for FunctionApproximator {
             var_map,
             input_dim,
             output_categories,
-            dtype,
             linear1,
             activation,
             linear2,
@@ -44,7 +42,7 @@ impl Model<f32> for FunctionApproximator {
         let length = input.len();
         Ok(
             Tensor::from_vec(input, (length / self.input_dim, self.input_dim), device)?
-                .to_dtype(self.dtype)?,
+                .to_dtype(DType::F32)?,
         )
     }
 
@@ -82,7 +80,7 @@ mod tests {
     #[test]
     fn test_model() {
         let device = Device::new_cuda(0).unwrap();
-        let model = FunctionApproximator::new(5, 3, DType::F32, &device);
+        let model = FunctionApproximator::new(5, 3, &device);
         let mut rng = rand::thread_rng();
         let mut input: Vec<f32> = Vec::new();
         let mut labels: Vec<u8> = Vec::new();
@@ -101,7 +99,7 @@ mod tests {
             let mut output = some_function(n2, n3, n4, n5);
             if rng.gen_range(0..100) < 1 {
                 // we introduce some labeling error
-                output = rng.gen_range(0..model.output_categories as u8);
+                output = rng.gen_range(0..model.get_output_categories() as u8);
             }
             labels.push(output)
         }
