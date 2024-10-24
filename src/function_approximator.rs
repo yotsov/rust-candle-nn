@@ -9,32 +9,50 @@ struct FunctionApproximator {
     output_categories: usize,
     // Feedforward layers:
     linear1: Linear,
-    activation: PReLU,
+    activation1: PReLU,
     linear2: Linear,
+    activation2: PReLU,
+    linear3: Linear,
+    activation3: PReLU,
+    linear4: Linear
 }
 
 impl Model<f32> for FunctionApproximator {
     fn new(input_dim: usize, output_categories: usize, device: &Device) -> Self {
-        let inner_dim: usize = 50;
+        let inner_dim1: usize = 1000;
+        let inner_dim2: usize = 100;
+        let inner_dim3: usize = 10;
         let var_map = VarMap::new();
         let vb = VarBuilder::from_varmap(&var_map, DType::F32, device);
-        let linear1 = linear(input_dim, inner_dim, vb.pp("linear1")).unwrap();
-        let activation = prelu(None, vb.pp("activation")).unwrap();
-        let linear2 = linear(inner_dim, output_categories, vb.pp("linear2")).unwrap();
+        let linear1 = linear(input_dim, inner_dim1, vb.pp("linear1")).unwrap();
+        let activation1 = prelu(None, vb.pp("activation1")).unwrap();
+        let linear2 = linear(inner_dim1, inner_dim2, vb.pp("linear2")).unwrap();
+        let activation2 = prelu(None, vb.pp("activation2")).unwrap();
+        let linear3 = linear(inner_dim2, inner_dim3, vb.pp("linear3")).unwrap();
+        let activation3 = prelu(None, vb.pp("activation3")).unwrap();
+        let linear4 = linear(inner_dim3, output_categories, vb.pp("linear4")).unwrap();
         Self {
             var_map,
             input_dim,
             output_categories,
             linear1,
-            activation,
+            activation1,
             linear2,
+            activation2,
+            linear3,
+            activation3,
+            linear4,
         }
     }
 
     fn forward(&self, tensor: &Tensor) -> anyhow::Result<Tensor> {
         let tensor = self.linear1.forward(tensor)?;
-        let tensor = self.activation.forward(&tensor)?;
+        let tensor = self.activation1.forward(&tensor)?;
         let tensor = self.linear2.forward(&tensor)?;
+        let tensor = self.activation2.forward(&tensor)?;
+        let tensor = self.linear3.forward(&tensor)?;
+        let tensor = self.activation3.forward(&tensor)?;
+        let tensor = self.linear4.forward(&tensor)?;
         Ok(tensor)
     }
 

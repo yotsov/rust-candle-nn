@@ -12,52 +12,56 @@ struct SentimentDetection {
     output_categories: usize,
     // Feedforward layers:
     embedding: Embedding,
+    convolution: Conv1d,
     activation1: PReLU,
-    conv: Conv1d,
+    linear1: Linear,
     activation2: PReLU,
-    linear: Linear,
+    linear2: Linear,
+    activation3: PReLU,
+    linear3: Linear
 }
 
 impl Model<u32> for SentimentDetection {
-    fn new(input_dim: usize, output_categories: usize, device: &Device) -> Self
-    where
-        Self: Sized,
-    {
-        let inner_dim1: usize = 5;
-        let inner_dim2: usize = 20;
+    fn new(input_dim: usize, output_categories: usize, device: &Device) -> Self {
+        let inner_dim1: usize = 1000;
+        let inner_dim2: usize = 100;
+        let inner_dim3: usize = 10;
+        let inner_dim0: usize = inner_dim1 / input_dim;
         let var_map = VarMap::new();
         let vb = VarBuilder::from_varmap(&var_map, DType::F32, device);
-        let embedding = embedding(input_dim, inner_dim1, vb.pp("embedding")).unwrap();
+        let embedding = embedding(input_dim, inner_dim0, vb.pp("embedding")).unwrap();
+        let convolution = conv1d(input_dim, inner_dim1, inner_dim0, Default::default(), vb.pp("convolution")).unwrap();
         let activation1 = prelu(None, vb.pp("activation1")).unwrap();
-        let conv = conv1d(
-            input_dim,
-            inner_dim2,
-            inner_dim1,
-            Default::default(),
-            vb.pp("conv"),
-        )
-        .unwrap();
+        let linear1 = linear(inner_dim1, inner_dim2, vb.pp("linear1")).unwrap();
         let activation2 = prelu(None, vb.pp("activation2")).unwrap();
-        let linear = linear(inner_dim2, output_categories, vb.pp("linear")).unwrap();
+        let linear2 = linear(inner_dim2, inner_dim3, vb.pp("linear2")).unwrap();
+        let activation3 = prelu(None, vb.pp("activation3")).unwrap();
+        let linear3 = linear(inner_dim3, output_categories, vb.pp("linear3")).unwrap();
         Self {
             var_map,
             input_dim,
             output_categories,
             embedding,
+            convolution,
             activation1,
-            conv,
+            linear1,
             activation2,
-            linear,
+            linear2,
+            activation3,
+            linear3
         }
     }
 
     fn forward(&self, tensor: &Tensor) -> anyhow::Result<Tensor> {
         let tensor = self.embedding.forward(tensor)?;
-        let tensor = self.activation1.forward(&tensor)?;
-        let tensor = self.conv.forward(&tensor)?;
+        let tensor = self.convolution.forward(&tensor)?;
         let tensor = tensor.squeeze(2)?;
+        let tensor = self.activation1.forward(&tensor)?;
+        let tensor = self.linear1.forward(&tensor)?;
         let tensor = self.activation2.forward(&tensor)?;
-        let tensor = self.linear.forward(&tensor)?;
+        let tensor = self.linear2.forward(&tensor)?;
+        let tensor = self.activation3.forward(&tensor)?;
+        let tensor = self.linear3.forward(&tensor)?;
         Ok(tensor)
     }
 
@@ -117,8 +121,8 @@ mod tests {
     fn test_model() {
         let device = Device::new_cuda(0).unwrap();
         let model = SentimentDetection::new(10, 2, &device);
-        let positive_words_number = 50;
-        let negative_words_number = 50;
+        let positive_words_number = 25;
+        let negative_words_number = 25;
         let mut rng = rand::thread_rng();
         let mut positive_words = HashSet::new();
         for _word in 0..positive_words_number {
@@ -130,7 +134,7 @@ mod tests {
         }
         let mut input: Vec<u32> = Vec::new();
         let mut labels: Vec<u8> = Vec::new();
-        let sentences = 100000;
+        let sentences = 10000;
         for _sentence in 0..sentences {
             let mut sentence = Vec::new();
             for _word in 0..model.get_input_dim() {
@@ -143,7 +147,7 @@ mod tests {
             }
         }
         assert!(
-            60.0 <= train_and_evaluate_model(&model, input, labels, sentences / 20, 0.02, &device)
+            65.0 <= train_and_evaluate_model(&model, input, labels, sentences / 20, 0.002, &device)
                 .unwrap()
         );
     }
